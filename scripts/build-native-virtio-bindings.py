@@ -31,6 +31,36 @@ symbols = []
 for i in range(count):
     ix, kind, _, _, value = struct.unpack_from('<IBBHQ', obj, sy + i * 16)
     symbols.append((obj[st + ix:obj.index(b'\0', st + ix)].decode(), value, kind))
+def leaf_name(symbol, readable):
+    """The method name of a vtable entry.
+
+    A demangled name (Class::method) yields the part after the last "::". A name c++filt
+    could not demangle comes back Itanium-mangled: _Z [K] N <len>Class <len>Method <params> E.
+    Skip the qualifier and the class, then read the length-prefixed method name. Anything
+    else is returned unchanged so the caller reports a mismatch instead of crashing.
+    """
+    if '::' in readable:
+        return readable.rsplit('::', 1)[1].split('(', 1)[0]
+    text = symbol.lstrip('_')                       # Mach-O writes a leading underscore
+    if not text.startswith('Z'):
+        return readable
+    text = text[1:]
+    if text.startswith('N'):
+        text = text[1:]
+    if text.startswith('K'):                        # a const method
+        text = text[1:]
+    parsed = []
+    for _ in range(2):                              # class, then method
+        digits = ''
+        while text and text[0].isdigit():
+            digits, text = digits + text[0], text[1:]
+        if not digits or len(text) < int(digits):
+            return readable
+        name, text = text[:int(digits)], text[int(digits):]
+        parsed.append(name)
+    return parsed[-1]
+
+
 vtable = next(v for name, v, kind in symbols if name == '__ZTV' + mangled)
 relocations = {}
 for segment in image['segments']:
@@ -55,16 +85,16 @@ for row, actual in zip(audit['methods'], compiled):
         if not own:
             raise SystemExit('A required transport operation is not implemented')
     elif actual != expected:
-        # c++filt leaves a symbol it cannot demangle as the raw mangled name, so the "::" split below would raise
-        # IndexError instead of reporting the mismatch. Compare whole names when either side is not demangled.
+        # c++filt returns a name it cannot demangle unchanged, so compare the method name only, whether the
+        # name came back demangled or mangled.
         if not own:
-            raise SystemExit('Concrete subclass dispatch mismatch at slot ' + str(row['slot']))
+            raise SystemExit(f'Concrete subclass dispatch mismatch at slot {row["slot"]}: '
+                             f'{readable[actual]} does not override {readable[expected]}')
         if row['slot'] not in (0, 1):
-            got, want = readable[actual], readable[expected]
-            got_leaf = got.split('::', 1)[1] if '::' in got else got
-            want_leaf = want.split('::', 1)[1] if '::' in want else want
-            if got_leaf != want_leaf:
-                raise SystemExit('Concrete subclass dispatch mismatch at slot ' + str(row['slot']))
+            got, want = leaf_name(actual, readable[actual]), leaf_name(expected, readable[expected])
+            if got != want:
+                raise SystemExit(f'Concrete subclass dispatch mismatch at slot {row["slot"]}: '
+                                 f'{got} does not override {want}')
     overrides += own
 kernel_path = ROOT / 'build/native-prelink/native-apfs-load-positive.macho'
 # The binding values come from the recorded audit; the candidate only proves the audit's identity. Build products are pruned, so a
