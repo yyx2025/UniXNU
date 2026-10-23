@@ -55,8 +55,16 @@ for row, actual in zip(audit['methods'], compiled):
         if not own:
             raise SystemExit('A required transport operation is not implemented')
     elif actual != expected:
-        if not own or (row['slot'] not in (0, 1) and readable[actual].split('::', 1)[1] != readable[expected].split('::', 1)[1]):
+        # c++filt leaves a symbol it cannot demangle as the raw mangled name, so the "::" split below would raise
+        # IndexError instead of reporting the mismatch. Compare whole names when either side is not demangled.
+        if not own:
             raise SystemExit('Concrete subclass dispatch mismatch at slot ' + str(row['slot']))
+        if row['slot'] not in (0, 1):
+            got, want = readable[actual], readable[expected]
+            got_leaf = got.split('::', 1)[1] if '::' in got else got
+            want_leaf = want.split('::', 1)[1] if '::' in want else want
+            if got_leaf != want_leaf:
+                raise SystemExit('Concrete subclass dispatch mismatch at slot ' + str(row['slot']))
     overrides += own
 kernel_path = ROOT / 'build/native-prelink/native-apfs-load-positive.macho'
 # The binding values come from the recorded audit; the candidate only proves the audit's identity. Build products are pruned, so a
