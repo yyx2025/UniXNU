@@ -185,12 +185,16 @@ def build(ctx, kernel=None):
     # The RAM root is a second entry, not a change to the first: the console profile stays the default,
     # and rd=md0 only makes sense once the loader has put a root image where the tree says it is.
     userland_entry = ''
+    default_id = 'xnu'
     if userland:
         root_args = check_args(list(arguments) + ['rd=md0'])
         userland_entry = (f'[[entry]]\nid = "userland"\ntitle = "{spec.get("userland_title", "userland: root image from RAM (rd=md0)")}"\n'
                           f'type = "xnu"\npath = "Payloads/kernel.macho"\ninitrd = "Payloads/userland.img"\nargs = "{root_args}"\n')
+        # A boot that carries a root image is a boot into userspace, so it is what the countdown should
+        # pick. The console entry stays one keypress away for the bring-up case where the root is refused.
+        default_id = 'userland'
     (stage / 'EFI/UniXNU/unixnu.toml').write_text(
-        f'version = 1\n[boot]\ntimeout = {spec.get("timeout", 3)}\ndefault = "xnu"\n[kits]\nautoload = false\n{loader}'
+        f'version = 1\n[boot]\ntimeout = {spec.get("timeout", 3)}\ndefault = "{default_id}"\n[kits]\nautoload = false\n{loader}'
         f'[[entry]]\nid = "xnu"\ntitle = "{spec.get("title", "UniXNU")}"\ntype = "xnu"\npath = "Payloads/kernel.macho"\n{initrd}'
         f'args = "{line}"\n{userland_entry}')
     for path in [stage, *stage.rglob('*')]:
