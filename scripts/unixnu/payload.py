@@ -187,9 +187,25 @@ def build(ctx, kernel=None):
     userland_entry = ''
     default_id = 'xnu'
     if userland:
+        title = spec.get('userland_title', 'userland: root image from RAM (rd=md0)')
         root_args = check_args(list(arguments) + ['rd=md0'])
-        userland_entry = (f'[[entry]]\nid = "userland"\ntitle = "{spec.get("userland_title", "userland: root image from RAM (rd=md0)")}"\n'
-                          f'type = "xnu"\npath = "Payloads/kernel.macho"\ninitrd = "Payloads/userland.img"\nargs = "{root_args}"\n')
+        # The board may carry a second, minimal argument line for the RAM root. The full bring-up line
+        # switches on dozens of hardware probes (sheng-*, offline-*), and each probe is a chance to touch
+        # an MMIO address this board does not answer. A synchronous external abort in the kernel is
+        # indistinguishable from "the root filesystem was refused" unless one entry leaves the probes off,
+        # so the minimal line is what the countdown boots and the full line stays one keypress away.
+        minimal = spec.get('userland_args')
+        entries = []
+        if minimal:
+            min_args = check_args(list(minimal) + ['rd=md0'])
+            entries.append(f'[[entry]]\nid = "userland"\ntitle = "{title}"\n'
+                           f'type = "xnu"\npath = "Payloads/kernel.macho"\ninitrd = "Payloads/userland.img"\nargs = "{min_args}"\n')
+            full_id = 'userland-full'
+        else:
+            full_id = 'userland'
+        entries.append(f'[[entry]]\nid = "{full_id}"\ntitle = "{title} [full probe args]"\n'
+                       f'type = "xnu"\npath = "Payloads/kernel.macho"\ninitrd = "Payloads/userland.img"\nargs = "{root_args}"\n')
+        userland_entry = ''.join(entries)
         # A boot that carries a root image is a boot into userspace, so it is what the countdown should
         # pick. The console entry stays one keypress away for the bring-up case where the root is refused.
         default_id = 'userland'
